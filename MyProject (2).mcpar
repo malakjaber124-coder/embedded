@@ -1,52 +1,40 @@
-[DEVICE]
-Name=STM32F103C6
-Clock=16000000
-[MEMORY_MODEL]
-Value=0
-[BUILD_TYPE]
-Value=0
-[ACTIVE_TAB]
-Value=..\..\New folder (8)\New folder\MyProject.c
-[USE_EEPROM]
-Value=0
-[USE_HEAP]
-Value=0
-[HEAP_SIZE]
-Value=2000
-[EEPROM_DEFINITION]
-Value=
-[FILES]
-Count=1
-File0=MyProject.c
-[BINARIES]
-Count=0
-[IMAGES]
-Count=0
-ActiveImageIndex=-1
-[OPENED_FILES]
-Count=1
-File0=MyProject.c
-[EEPROM]
-Count=0
-[ACTIVE_COMMENTS_FILES]
-Count=0
-[OTHER_FILES]
-Count=0
-[SEARCH_PATH]
-Count=4
-Path0=C:\Users\Public\Documents\Mikroelektronika\mikroC PRO for ARM\defs\
-Path1=C:\Users\PC 109\Desktop\traffic light by IR\New folder\
-Path2=C:\Users\PC 109\Desktop\New folder (8)\New folder\
-Path3=C:\Users\Public\Documents\Mikroelektronika\mikroC PRO for ARM\Uses\ST M3\
-[HEADER_PATH]
-Count=0
-[HEADERS]
-Count=0
-[PLDS]
-Count=0
-[Useses]
-Count=0
-[PROGRAMMER_OPTIONS]
-Value=SWD
-[PROGRAMMER_TYPE]
-Value=mE
+void main() {
+    unsigned int i = 0;
+
+    // Configure GPIOA Pins 0, 1, 2, and 3 as Output for the Binary LEDs
+    GPIO_Config(&GPIOA_BASE, 
+                _GPIO_PINMASK_0 | _GPIO_PINMASK_1 | _GPIO_PINMASK_2 | _GPIO_PINMASK_3, 
+                _GPIO_CFG_MODE_OUTPUT | _GPIO_CFG_SPEED_MAX | _GPIO_CFG_OTYPE_PP);
+
+    // Configure GPIOB Pin 0 as Digital Input for the IR Sensor
+    GPIO_Digital_Input(&GPIOB_BASE, _GPIO_PINMASK_0);
+
+    // Initialize LEDs to OFF
+    GPIOA_ODR = 0;
+
+    for( ; ; ) // Infinite Super-Loop
+    {
+        // Check IR Sensor: If sensor is triggered (assuming active high/1)
+        if (GPIOB_IDR.B0 == 1) 
+        {
+            // Output the current value of 'i' to the LEDs in binary
+            GPIOA_ODR = i;
+            
+            Delay_ms(1000); // Wait 1 second
+            
+            i++; // Increment counter
+            
+            // Reset counter after 15 (4 bits: 0 to 15)
+            if (i >= 16) {
+                i = 0;
+            }
+        }
+        else 
+        {
+            // Optional: What happens if NO traffic is detected?
+            // For now, we clear the LEDs and wait
+            GPIOA_ODR = 0;
+            i = 0; // Reset count or keep it? Keeping it 0 for a fresh start.
+        }
+    }
+}
