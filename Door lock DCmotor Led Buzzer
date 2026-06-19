@@ -1,122 +1,175 @@
-// Predefined passcode and system constants
-const char CORRECT_CODE[4] = {'1', '2', '3', '4'};
-#define BUZZER_TIME_MS 3000
+// STM32F103C6, mikroC PRO for ARM
+// 4x3 keypad + 16x2 LCD + L298 motor + LED + buzzer
+// Keypad on GPIOA, LCD+LED+BUZZER+L298 on GPIOB
+// Correct password = 1 2 3 4, 3 tries -> buzzer
+// LCD module connections (Port B)
+sbit LCD_RS at GPIOB_ODR.B1;
+sbit LCD_EN at GPIOB_ODR.B2;
+sbit LCD_D4 at GPIOB_ODR.B3;
+sbit LCD_D5 at GPIOB_ODR.B4;
+sbit LCD_D6 at GPIOB_ODR.B5;
+sbit LCD_D7 at GPIOB_ODR.B6;
+sbit LCD_RS_Direction at GPIOB_CRL.B4;
+sbit LCD_EN_Direction at GPIOB_CRL.B8;
+sbit LCD_D4_Direction at GPIOB_CRL.B12;
 
-// Function prototypes
-char Keypad_Scan(void);
-void Init_System(void);
+sbit LCD_D5_Direction at GPIOB_CRL.B16;
+sbit LCD_D6_Direction at GPIOB_CRL.B20;
+sbit LCD_D7_Direction at GPIOB_CRL.B24;
+// End LCD module connections
+// Password data
+char correct_code[4] = {'1','2','3','4'};
+char entered[4];
+unsigned short idx = 0;
+unsigned short fail_count = 0;
+unsigned short tries_left = 3;
+void delay_ms(unsigned int ms) { while(ms--) Delay_ms(1); }
+// 4x3 keypad layout: rows PA4-PA7, columns PA0-PA2
+char keymap[4][3] = {
+{'1','4','7'},
+{'2','5','8'},
+{'3','7','9'},
+{'*','0','#'}
+};
+char keypad_read() {
+unsigned short r, c;
+unsigned long all_rows = (1 << 4) | (1 << 5) | (1 << 6) | (1 << 7);
+for (r = 0; r < 4; r++) {
+GPIOA_ODR |= all_rows; // all rows HIGH
+GPIOA_ODR &= ~(1UL << (4 + r)); // this row LOW
+delay_ms(2);
+for (c = 0; c < 3; c++) { // only 3 columns
+if ((GPIOA_IDR & (1 << c)) == 0) { // key pressed
+while ((GPIOA_IDR & (1 << c)) == 0); // wait release
+delay_ms(20);
+return keymap[r][c];
+}
+}
+}
+return 0;
+}
+void reset_code() {
+idx = 0;
 
+entered[0] = entered[1] = entered[2] = entered[3] = 0;
+}
+void lcd_show_tries() {
+char txt[4];
+Lcd_Cmd(_LCD_CLEAR);
+Lcd_Out(1,1,"Tries:");
+txt[0] = '0' + tries_left;
+txt[1] = 0;
+Lcd_Out(1,8,txt);
+Lcd_Out(2,1,"Code:");
+}
+void motor_open() {
+unsigned int i;
+// L298 channel A: IN1=PB0, IN2=PB7, ENA=PB8
+GPIOB_ODR |= (1 << 0); // IN1 = 1
+GPIOB_ODR &= ~(1 << 7); // IN2 = 0
+for (i = 0; i < 3000; i++) { // ~3 s of software PWM
+GPIOB_ODR |= (1 << 8); // ENA HIGH
+Delay_us(50);
+GPIOB_ODR &= ~(1 << 8); // ENA LOW
+Delay_us(50);
+}
+GPIOB_ODR &= ~((1 << 0) | (1 << 7) | (1 << 8)); // stop motor
+}
+void buzzer_alarm() {
+GPIOB_ODR |= (1 << 10); // PB10 buzzer ON
+Delay_ms(30);
+GPIOB_ODR &= ~(1 << 10); // OFF
+}
 void main() {
-    char input_code[4];
-    int attempt_count = 0;
-    int digit_idx = 0;
-    char key;
-    int i;
-    char match;
+unsigned short pos;
+// Enable GPIOA, GPIOB clocks
+RCC_APB2ENR |= (1 << 2) | (1 << 3);
+// ---------- Keypad on PORTA ----------
 
-    Init_System();
+// PA4..PA7 outputs (rows)
+GPIOA_CRL &= 0x0000FFFF;
+GPIOA_CRL |= 0x22220000; // PA4-PA7 output 2MHz push-pull
+// PA0..PA2 inputs with pull-up (columns)
+GPIOA_CRL &= 0xFFFFF000;
+GPIOA_CRL |= (0x8 << 0) | (0x8 << 4) | (0x8 << 8); // CNF=10, MODE=00
+GPIOA_ODR |= (1 << 0) | (1 << 1) | (1 << 2);
+// PA3 input with pull-up (unused)
+GPIOA_CRL |= (0x8 << 12);
+GPIOA_ODR |= (1 << 3);
+// ---------- LCD + LED + BUZZER + L298 on PORTB ----------
+// PB1..PB6 as outputs for LCD (sbits already bound)
+GPIOB_CRL |= 0x22222220; // rough config for B1-B6 as outputs
+// PB0 (IN1), PB7 (IN2), PB8 (ENA), PB9 (LED), PB10 (BUZZER) as outputs
+// PB0 in CRL, bits 0..3
+GPIOB_CRL &= 0xFFFFFFF0;
+GPIOB_CRL |= 0x00000002; // PB0 output
+// PB7 in CRL, bits 28..31
+GPIOB_CRL &= 0x0FFFFFFF;
+GPIOB_CRL |= 0x20000000; // PB7 output
+// PB8, PB9, PB10 in CRH
+GPIOB_CRH &= 0xFFFFF000; // clear PB8,PB9,PB10
+GPIOB_CRH |= 0x00000222; // set PB8,PB9,PB10 as outputs
+// Initial states
+GPIOB_ODR &= ~((1 << 0) | (1 << 7) | (1 << 8) | (1 << 9) | (1 << 10));
+// ---------- LCD init ----------
+Lcd_Init();
+Lcd_Cmd(_LCD_CURSOR_OFF);
+lcd_show_tries();
+while(1) {
+char k = keypad_read();
+if (k != 0) {
+if (k == '#') { // reset key
 
-    // Ensure outputs start in an OFF state
-    GPIOA_ODR &= ~(1 << 0); // LED off
-    GPIOA_ODR &= ~(1 << 1); // Motor off
-    GPIOA_ODR &= ~(1 << 3); // Buzzer off
-
-    while (1) {
-        key = Keypad_Scan();
-
-        if (key != 0) { // If a valid key is pressed
-            // Store the pressed key
-            input_code[digit_idx] = key;
-            digit_idx++;
-
-            // Debounce delay
-            Delay_ms(250);
-
-            // Once 4 digits are collected, validate them
-            if (digit_idx == 4) {
-                match = 1;
-                for (i = 0; i < 4; i++) {
-                    if (input_code[i] != CORRECT_CODE[i]) {
-                        match = 0;
-                        break;
-                    }
-                }
-
-                if (match == 1) {
-                    // Success: Turn on LED and spin DC Motor
-                    GPIOA_ODR |= (1 << 0);  // Turn on LED (PA0)
-                    GPIOA_ODR |= (1 << 1);  // Spin Motor forward (PA1 High)
-                    GPIOA_ODR &= ~(1 << 2); // PA2 Low
-                    
-                    attempt_count = 0;      // Reset failed attempts
-                    Delay_ms(5000);         // Keep unlocked for 5 seconds
-                    
-                    // Relock system
-                    GPIOA_ODR &= ~(1 << 0);
-                    GPIOA_ODR &= ~(1 << 1);
-                } else {
-                    // Failure: Increment wrong attempts counter
-                    attempt_count++;
-                    
-                    if (attempt_count >= 3) {
-                        // Trigger buzzer for 3 seconds after 3 failed attempts
-                        GPIOA_ODR |= (1 << 3);  // Turn on Buzzer (PA3)
-                        Delay_ms(BUZZER_TIME_MS);
-                        GPIOA_ODR &= ~(1 << 3); // Turn off Buzzer
-                        attempt_count = 0;      // Reset counter after penalty
-                    }
-                }
-                
-                // Reset index for the next passcode entry attempt
-                digit_idx = 0;
-            }
-        }
-        Delay_ms(50);
-    }
+reset_code();
+fail_count = 0;
+tries_left = 3;
+GPIOB_ODR &= ~((1 << 9) | (1 << 0) | (1 << 7) | (1 << 8)); // LED+motor off
+lcd_show_tries();
 }
-
-// System Initialization
-void Init_System() {
-    // Enable GPIOA and GPIOB Clocks
-    RCC_APB2ENR |= (1 << 2) | (1 << 3);
-
-    // Configure PA0, PA1, PA2, PA3 as General Purpose Output Push-Pull (50MHz)
-    GPIOA_CRL &= 0xFFFF0000; 
-    GPIOA_CRL |= 0x00003333; 
-
-    // Configure PB0 to PB3 (Rows) as Output Push-Pull (50MHz)
-    GPIOB_CRL &= 0xFFFF0000;
-    GPIOB_CRL |= 0x00003333;
-
-    // Configure PB4 to PB7 (Columns) as Input with Pull-Up/Pull-Down
-    GPIOB_CRL &= 0x0000FFFF;
-    GPIOB_CRL |= 0x88880000;
-    GPIOB_ODR |= 0x00F0; // Enable Pull-up resistors for columns (PB4-PB7)
+else if (k >= '0' && k <= '9') { // only digits used in code
+if (idx < 4) {
+entered[idx] = k;
+// show digit after "Code:" (which is 5 chars)
+pos = 6 + idx;
+Lcd_Chr(2, pos, k);
+idx++;
 }
+if (idx == 4) {
+if (entered[0]==correct_code[0] &&
+entered[1]==correct_code[1] &&
+entered[2]==correct_code[2] &&
+entered[3]==correct_code[3]) {
+// -------- Correct password --------
+Lcd_Cmd(_LCD_CLEAR);
+Lcd_Out(1,1,"UNLOCKED");
+GPIOB_ODR |= (1 << 9); // PB9 LED ON
+motor_open();
+GPIOB_ODR &= ~(1 << 9); // LED OFF
+fail_count = 0;
+tries_left = 3;
+delay_ms(10);
+lcd_show_tries();
+} else {
+// -------- Wrong password --------
+fail_count++;
+if (tries_left > 0) tries_left--;
+Lcd_Cmd(_LCD_CLEAR);
+Lcd_Out(1,1,"INVALID");
+Lcd_Out(2,1,"Tries:");
+pos = '0' + tries_left;
+Lcd_Chr(2,8,pos);
 
-// 4x4 Keypad Matrix Scanning Implementation
-char Keypad_Scan() {
-    // Key layout mapping array
-    char keypad_layout[4][4] = {
-        {'1', '2', '3', 'A'},
-        {'4', '5', '6', 'B'},
-        {'7', '8', '9', 'C'},
-        {'*', '0', '#', 'D'}
-    };
-    int r, c;
-
-    for (r = 0; r < 4; r++) {
-        // Set all rows HIGH, pull current row LOW
-        GPIOB_ODR |= 0x000F;
-        GPIOB_ODR &= ~(1 << r);
-        Delay_ms(5);
-
-        // Check if any column input reads LOW (active press)
-        for (c = 0; c < 4; c++) {
-            if (!(GPIOB_IDR & (1 << (c + 4)))) {
-                return keypad_layout[r][c]; // Key detected
-            }
-        }
-    }
-    return 0; // No key pressed
+delay_ms(10);
+if (fail_count >= 3) {
+buzzer_alarm();
+fail_count = 0;
+tries_left = 3;
+}
+lcd_show_tries();
+}
+reset_code();
+}
+}
+}
+}
 }
