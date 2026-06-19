@@ -1,0 +1,41 @@
+void main() {
+    unsigned char current_state = 1;
+
+    RCC_APB2ENR.IOPAEN = 1;
+    RCC_APB2ENR.IOPBEN = 1;
+
+    // PA4, PA3, PA2 as Output (3), PA0 as Input Pull-up (8)
+    GPIOA_CRL = 0x00033308;
+    GPIOA_ODR.B0 = 1;
+
+    // PB7 as standard Push-Pull Output (3) to drive the state line
+    GPIOB_CRL = 0x33444444;
+    GPIOB_ODR.B7 = 0; // Start with line low (OFF)
+
+    GPIOA_ODR.B2 = 0;
+    GPIOA_ODR.B3 = 0;
+    GPIOA_ODR.B4 = 0;
+
+    while(1) {
+        current_state = GPIOA_IDR.B0;
+
+        // --- SWITCH CLOSED: FAN ON ---
+        if (current_state == 0) {
+            GPIOA_ODR.B4 = 1;
+            GPIOA_ODR.B2 = 1;
+            GPIOA_ODR.B3 = 0;
+
+            GPIOB_ODR.B7 = 1; // Hold line HIGH to signal "ON" to the LCD
+        }
+        // --- SWITCH OPEN: FAN OFF ---
+        else {
+            GPIOA_ODR.B2 = 0;
+            GPIOA_ODR.B3 = 0;
+            GPIOA_ODR.B4 = 0;
+
+            GPIOB_ODR.B7 = 0; // Hold line LOW to signal "OFF" to the LCD
+        }
+
+        Delay_ms(20);
+    }
+}
