@@ -1,0 +1,79 @@
+unsigned char digitCode[10] = {
+    0x3F, // 0
+    0x06, // 1
+    0x5B, // 2
+    0x4F, // 3
+    0x66, // 4
+    0x6D, // 5
+    0x7D, // 6
+    0x07, // 7
+    0x7F, // 8
+    0x6F  // 9
+};
+
+unsigned char count = 0;
+unsigned char last_button_state = 0;
+
+
+sbit BUTTON at GPIOB_IDR.B4;
+
+void main() {
+
+    GPIO_Digital_Output(&GPIOB_BASE, _GPIO_PINMASK_0 | _GPIO_PINMASK_1 | _GPIO_PINMASK_2 | _GPIO_PINMASK_3);
+    GPIO_Digital_Output(&GPIOA_BASE, _GPIO_PINMASK_0 | _GPIO_PINMASK_1 | _GPIO_PINMASK_2 | _GPIO_PINMASK_3 | _GPIO_PINMASK_4 | _GPIO_PINMASK_5 | _GPIO_PINMASK_6);
+
+
+    GPIO_Digital_Input(&GPIOB_BASE, _GPIO_PINMASK_4);
+
+
+    GPIO_Config(&GPIOB_BASE,
+                _GPIO_PINMASK_0 | _GPIO_PINMASK_1 | _GPIO_PINMASK_2 | _GPIO_PINMASK_3,
+                _GPIO_CFG_MODE_OUTPUT | _GPIO_CFG_SPEED_MAX | _GPIO_CFG_OTYPE_OD);
+
+    GPIO_Config(&GPIOA_BASE,
+                _GPIO_PINMASK_0 | _GPIO_PINMASK_1 | _GPIO_PINMASK_2 | _GPIO_PINMASK_3 | _GPIO_PINMASK_4 | _GPIO_PINMASK_5 | _GPIO_PINMASK_6,
+                _GPIO_CFG_MODE_OUTPUT | _GPIO_CFG_SPEED_MAX | _GPIO_CFG_OTYPE_PP);
+
+
+    GPIOA_ODR = digitCode[0];
+    GPIOB_ODR.B0 = 0;
+    GPIOB_ODR.B1 = 0;
+    GPIOB_ODR.B2 = 0;
+    GPIOB_ODR.B3 = 0;
+
+
+  // You can delete the 'unsigned char last_button_state = 0;' variable entirely!
+
+    // 5. Infinite Loop
+    while(1) {
+
+        // If the button is pressed...
+        if (BUTTON == 1) {
+
+            count++;
+
+            if (count > 9) {
+                count = 0;
+            }
+
+            // Update 7-Segment Display
+            GPIOA_ODR = digitCode[count];
+
+            // Update the 4 LEDs in binary
+            GPIOB_ODR.B0 = (count >> 0) & 1;
+            GPIOB_ODR.B1 = (count >> 1) & 1;
+            GPIOB_ODR.B2 = (count >> 2) & 1;
+            GPIOB_ODR.B3 = (count >> 3) & 1;
+
+            // THE BULLETPROOF TRAP:
+            // Do absolutely nothing as long as the button is held down.
+            // This forces the code to wait until you let go!
+            while (BUTTON == 1) {
+                // Wait here...
+            }
+
+            // A tiny delay after you let go to prevent physical bouncing
+            Delay_ms(50);
+        }
+    }
+}
