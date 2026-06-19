@@ -1,68 +1,122 @@
-[DEVICE]
-Name=STM32F103C6
-Clock=16000000
-[MEMORY_MODEL]
-Value=0
-[BUILD_TYPE]
-Value=0
-[ACTIVE_TAB]
-Value=MyProject.c
-[USE_EEPROM]
-Value=0
-[USE_HEAP]
-Value=0
-[HEAP_SIZE]
-Value=0
-[EEPROM_DEFINITION]
-Value=
-[FILES]
-File0=MyProject.c
-Count=1
-[BINARIES]
-Count=0
-[IMAGES]
-Count=0
-ActiveImageIndex=-1
-[OPENED_FILES]
-File0=MyProject.c
-Count=1
-[EEPROM]
-Count=0
-[ACTIVE_COMMENTS_FILES]
-Count=0
-[OTHER_FILES]
-Count=0
-[SEARCH_PATH]
-Count=0
-[HEADER_PATH]
-Count=0
-[HEADERS]
-Count=0
-[PLDS]
-Count=0
-[Useses]
-File0=ADC
-Count=1
-[EXPANDED_NODES]
-Count=0
-[LIB_EXPANDED_NODES]
-0=mikroE Libraries
-1=System Libraries
-Count=2
-[PROGRAMMER_OPTIONS]
-Value=SWD
-[PROGRAMMER_TYPE]
-Value=mikroE mikroProg
-[DEBUGGER_TYPE]
-Value=
-[NECTO_OPTIONS]
-NECTO_RESET_TYPE=0
-NECTO_ERASE_TYPE=0
-NECTO_CONNECTION=1
-NECTO_SPEED=4
-NECTO_HALT_AFTER=0
-NECTO_VERIFY_AFTER=1
-[AT_DEBUG_STARTUP]
-LOAD_BIN_TO_RAM=0
-START_EXEC_FROM_ADDR=0
-START_ADDR=-1
+// --- 1. PIN DEFINITIONS ---
+sbit L_RST at GPIOA_ODR.B2;
+sbit L_DC  at GPIOA_ODR.B3;
+sbit L_CS  at GPIOA_ODR.B4;
+sbit L_SCL at GPIOA_ODR.B5;
+sbit L_SDI at GPIOA_ODR.B7;
+
+// --- 2. FONT DATA (0-9 + C) ---
+const char font8x8[11][8] = {
+    {0x3C,0x42,0x42,0x42,0x42,0x42,0x42,0x3C}, // 0
+    {0x08,0x18,0x08,0x08,0x08,0x08,0x08,0x1C}, // 1
+    {0x3C,0x42,0x02,0x02,0x3C,0x40,0x40,0x7E}, // 2
+    {0x3C,0x42,0x02,0x1C,0x02,0x02,0x42,0x3C}, // 3
+    {0x04,0x0C,0x14,0x24,0x44,0x7E,0x04,0x04}, // 4
+    {0x7E,0x40,0x40,0x7C,0x02,0x02,0x42,0x3C}, // 5
+    {0x3C,0x42,0x40,0x7C,0x42,0x42,0x42,0x3C}, // 6
+    {0x7E,0x02,0x04,0x08,0x10,0x10,0x10,0x10}, // 7
+    {0x3C,0x42,0x42,0x3C,0x42,0x42,0x42,0x3C}, // 8
+    {0x3C,0x42,0x42,0x3E,0x02,0x02,0x42,0x3C}, // 9
+    {0x3C,0x42,0x40,0x40,0x40,0x40,0x42,0x3C}  // 10 = C
+};
+
+// --- 3. TFT COMMUNICATION ---
+void Send_Byte(unsigned char val) {
+    signed char b;
+    for (b = 7; b >= 0; b--) {
+        L_SCL = 0;
+        L_SDI = (val >> b) & 0x01;
+        L_SCL = 1;
+    }
+}
+
+void TFT_Cmd(unsigned char cmd) { L_DC = 0; L_CS = 0; Send_Byte(cmd); L_CS = 1; }
+void TFT_Dat(unsigned char dat) { L_DC = 1; L_CS = 0; Send_Byte(dat); L_CS = 1; }
+
+void Set_Window(unsigned int x1, unsigned int y1, unsigned int x2, unsigned int y2) {
+    TFT_Cmd(0x2A); TFT_Dat(x1 >> 8); TFT_Dat(x1 & 0xFF); TFT_Dat(x2 >> 8); TFT_Dat(x2 & 0xFF);
+    TFT_Cmd(0x2B); TFT_Dat(y1 >> 8); TFT_Dat(y1 & 0xFF); TFT_Dat(y2 >> 8); TFT_Dat(y2 & 0xFF);
+    TFT_Cmd(0x2C);
+}
+
+void Fill_Rect(unsigned int x, unsigned int y, unsigned int w, unsigned int h, unsigned int color) {
+    unsigned long i, total = (unsigned long)w * h;
+    Set_Window(x, y, x + w - 1, y + h - 1);
+    for (i = 0; i < total; i++) { TFT_Dat(color >> 8); TFT_Dat(color & 0xFF); }
+}
+
+void Draw_Char(unsigned int x, unsigned int y, int idx, unsigned int color, int size) {
+    int r, c;
+    for (r = 0; r < 8; r++) {
+        for (c = 0; c < 8; c++) {
+            if ((font8x8[idx][r] >> (7 - c)) & 0x01) {
+                Fill_Rect(x + (c * size), y + (r * size), size, size, color);
+            }
+        }
+    }
+}
+
+void Display_Temp(int t_c) {
+    Fill_Rect(30, 120, 200, 50, 0x0000); // Background: Black
+    if (t_c >= 100) {
+        Draw_Char(30, 120, (t_c / 100), 0xFFFF, 5); // Numbers: White
+        Draw_Char(75, 120, (t_c / 10) % 10, 0xFFFF, 5); // Numbers: White
+        Draw_Char(120, 120, (t_c % 10), 0xFFFF, 5); // Numbers: White
+        Draw_Char(165, 120, 10, 0xFFFF, 5); // "C": White (Changed from Red)
+    } else {
+        Draw_Char(50, 120, (t_c / 10), 0xFFFF, 5); // Numbers: White
+        Draw_Char(95, 120, (t_c % 10), 0xFFFF, 5); // Numbers: White
+        Draw_Char(140, 120, 10, 0xFFFF, 5); // "C": White (Changed from Red)
+    }
+}
+
+void TFT_Init(void) {
+    L_RST = 0; Delay_ms(50); L_RST = 1; Delay_ms(50);
+    TFT_Cmd(0x11); Delay_ms(120);
+    TFT_Cmd(0x36); TFT_Dat(0x48);
+    TFT_Cmd(0x3A); TFT_Dat(0x55);
+    TFT_Cmd(0x29); Delay_ms(20);
+}
+
+// --- 4. MAIN ---
+void main() {
+    unsigned int val;
+    int t_c;
+    int old_t = 27; // Reset to 25C starting point
+
+    // Clock setup for GPIOA, ADC1, and AFIO
+    RCC_APB2ENR |= (1 << 2) | (1 << 9) | (1 << 0);
+    AFIO_MAPR   |= (1 << 25);
+
+    // PA0 = Analog input mode
+    GPIOA_CRL &= 0xFFFFFFF0;
+
+    // TFT Pins = Digital Output
+    GPIO_Digital_Output(&GPIOA_BASE, _GPIO_PINMASK_2 | _GPIO_PINMASK_3 | _GPIO_PINMASK_4 | _GPIO_PINMASK_5 | _GPIO_PINMASK_7);
+
+    // Manual ADC setup for stability
+    ADC1_CR2.ADON = 1;
+    Delay_ms(100);
+
+    TFT_Init();
+    Fill_Rect(0, 0, 240, 320, 0x0000); // Fill screen with black
+    Display_Temp(old_t);
+
+    while (1) {
+        ADC1_CR2.SWSTART = 1; // Trigger conversion
+
+        // Wait for hardware to finish the read
+        while(ADC1_SR.EOC == 0);
+        val = ADC1_DR;
+
+        // Math updated for 3.3V reference confirmed in schematic
+        t_c = (int)(((unsigned long)val * 330UL) / 4095UL);
+
+        if (t_c != old_t) {
+            Display_Temp(t_c);
+            old_t = t_c;
+        }
+
+        Delay_ms(500);
+    }
+}
