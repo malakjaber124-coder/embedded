@@ -1,0 +1,41 @@
+sbit LCD_RS at GPIOB_ODR.B12;
+sbit LCD_EN at GPIOB_ODR.B13;
+sbit LCD_D4 at GPIOB_ODR.B14;
+sbit LCD_D5 at GPIOB_ODR.B15;
+sbit LCD_D6 at GPIOA_ODR.B8;
+sbit LCD_D7 at GPIOA_ODR.B9;
+
+// Read the real-time state directly off this pin
+#define SIGNAL_PIN GPIOB_IDR.B7
+
+void main() {
+    RCC_APB2ENR.IOPAEN = 1;
+    RCC_APB2ENR.IOPBEN = 1;
+
+    // PA8 and PA9 as Push-Pull Outputs (3)
+    GPIOA_CRH = 0x44444433;
+
+    // PB7 configured as Floating Input (4) to read Master's signal
+    GPIOB_CRL = 0x44333333;
+
+    // PB12, PB13, PB14, PB15 as Push-Pull Outputs (3)
+    GPIOB_CRH = 0x33334444;
+
+    Lcd_Init();
+    Lcd_Cmd(_LCD_CLEAR);
+    Lcd_Cmd(_LCD_CURSOR_OFF);
+
+    Lcd_Out(1, 1, "SYSTEM READY");
+
+    while(1) {
+        // Read the signal line continuously
+        if (SIGNAL_PIN == 1) {
+            Lcd_Out(2, 1, "FAN STATUS: ON ");
+        }
+        else {
+            Lcd_Out(2, 1, "FAN STATUS: OFF");
+        }
+
+        Delay_ms(100); // Super stable, non-blocking refresh delay
+    }
+}
