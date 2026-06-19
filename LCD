@@ -1,0 +1,107 @@
+sbit Soft_I2C_Scl_Output at GPIOB_ODR.B6;
+sbit Soft_I2C_Sda_Output at GPIOB_ODR.B1;
+sbit Soft_I2C_Scl_Input at GPIOB_IDR.B6;
+sbit Soft_I2C_Sda_Input at GPIOB_IDR.B1;
+sbit Soft_I2C_Scl_Direction at GPIOB_CRL.B6;
+sbit Soft_I2C_Sda_Direction at GPIOB_CRL.B1;
+
+
+sbit LCD_RS at GPIOA_ODR.B0;
+sbit LCD_EN at GPIOA_ODR.B1;
+sbit LCD_D4 at GPIOA_ODR.B2;
+sbit LCD_D5 at GPIOA_ODR.B3;
+sbit LCD_D6 at GPIOA_ODR.B4;
+sbit LCD_D7 at GPIOA_ODR.B5;
+
+sbit LCD_RS_Direction at GPIOA_CRL.B0;
+sbit LCD_EN_Direction at GPIOA_CRL.B1;
+sbit LCD_D4_Direction at GPIOA_CRL.B2;
+sbit LCD_D5_Direction at GPIOA_CRL.B3;
+sbit LCD_D6_Direction at GPIOA_CRL.B4;
+sbit LCD_D7_Direction at GPIOA_CRL.B5;
+
+
+
+
+unsigned short bcd2bin (unsigned short bcd) {
+ return ((bcd >> 4) * 10 + (bcd & 0x0F));
+}
+
+
+unsigned short bin2bcd (unsigned short bin) {
+ return (((bin / 10) << 4) | (bin % 10));
+}
+
+
+void DS1307_SetTime(unsigned short sec, unsigned short min, unsigned short hour) {
+ Soft_I2C_Start();
+ Soft_I2C_Write(0xD0);
+ Soft_I2C_Write(0x00);
+ Soft_I2C_Write(bin2bcd(sec));
+ Soft_I2C_Write(bin2bcd(min));
+ Soft_I2C_Write(bin2bcd(hour));
+
+ Soft_I2C_Stop();
+}
+
+
+void DS1307_GetTime(unsigned short *sec, unsigned short *min, unsigned short *hour) {
+ Soft_I2C_Start();
+ Soft_I2C_Write(0xD0);
+ Soft_I2C_Write(0x00);
+ Soft_I2C_Start();
+ Soft_I2C_Write(0xD1);
+
+ *sec = bcd2bin(Soft_I2C_Read(1));
+ *min = bcd2bin(Soft_I2C_Read(1));
+ *hour = bcd2bin(Soft_I2C_Read(0));
+ Soft_I2C_Stop();
+}
+
+
+
+void main() {
+ unsigned short s, m, h;
+ unsigned short reg0;
+ char txt[9];
+
+ Soft_I2C_Init();
+ Lcd_Init();
+ Lcd_Cmd(_LCD_CLEAR);
+ Lcd_Cmd(_LCD_CURSOR_OFF);
+
+
+ Soft_I2C_Start();
+ Soft_I2C_Write(0xD0);
+ Soft_I2C_Write(0x00);
+ Soft_I2C_Start();
+ Soft_I2C_Write(0xD1);
+ reg0 = Soft_I2C_Read(0);
+ Soft_I2C_Stop();
+
+
+ if (reg0 & 0x80) {
+
+ DS1307_SetTime(0, 20, 1);
+ }
+
+ while (1) {
+
+ DS1307_GetTime(&s, &m, &h);
+
+
+ txt[0] = (h / 10) + '0';
+ txt[1] = (h % 10) + '0';
+ txt[2] = ':';
+ txt[3] = (m / 10) + '0';
+ txt[4] = (m % 10) + '0';
+ txt[5] = ':';
+ txt[6] = (s / 10) + '0';
+ txt[7] = (s % 10) + '0';
+ txt[8] = '\0';
+
+ Lcd_Out(1, 1, "Time:");
+ Lcd_Out(1, 7, txt);
+ Delay_ms(1000);
+ }
+}
