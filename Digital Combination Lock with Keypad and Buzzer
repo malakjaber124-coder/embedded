@@ -1,0 +1,325 @@
+//=====================================================
+// LCD Module Connections (PORTB)
+//=====================================================
+sbit LCD_RS at GPIOB_ODR.B1;
+sbit LCD_EN at GPIOB_ODR.B2;
+sbit LCD_D4 at GPIOB_ODR.B3;
+sbit LCD_D5 at GPIOB_ODR.B4;
+sbit LCD_D6 at GPIOB_ODR.B5;
+sbit LCD_D7 at GPIOB_ODR.B6;
+
+sbit LCD_RS_Direction at GPIOB_CRL.B4;
+sbit LCD_EN_Direction at GPIOB_CRL.B8;
+sbit LCD_D4_Direction at GPIOB_CRL.B12;
+sbit LCD_D5_Direction at GPIOB_CRL.B16;
+sbit LCD_D6_Direction at GPIOB_CRL.B20;
+sbit LCD_D7_Direction at GPIOB_CRL.B24;
+
+
+//=====================================================
+// Global Variables
+//=====================================================
+char correct_code[4] = {'1','2','3','4'};
+char entered[4];
+
+unsigned short idx = 0;
+unsigned short fail_count = 0;
+unsigned short tries_left = 3;
+
+
+//=====================================================
+// Delay Function
+//=====================================================
+void delay_ms(unsigned int ms)
+{
+    while(ms--)
+        Delay_ms(1);
+}
+
+
+//=====================================================
+// Keypad Layout
+// Rows : PA4-PA7
+// Columns : PA0-PA2
+//=====================================================
+char keymap[4][3] =
+{
+    {'1','4','7'},
+    {'2','5','8'},
+    {'3','6','9'},
+    {'*','0','#'}
+};
+
+
+//=====================================================
+// Read Keypad
+//=====================================================
+char keypad_read()
+{
+    unsigned short r, c;
+    unsigned long all_rows = (1<<4)|(1<<5)|(1<<6)|(1<<7);
+
+    for(r=0; r<4; r++)
+    {
+        GPIOA_ODR |= all_rows;              // All rows HIGH
+        GPIOA_ODR &= ~(1UL << (4+r));       // Current row LOW
+
+        delay_ms(2);
+
+        for(c=0; c<3; c++)
+        {
+            if((GPIOA_IDR & (1<<c)) == 0)
+            {
+                while((GPIOA_IDR & (1<<c)) == 0);
+                delay_ms(20);
+
+                return keymap[r][c];
+            }
+        }
+    }
+
+    return 0;
+}
+
+
+//=====================================================
+// Reset Entered Password
+//=====================================================
+void reset_code()
+{
+    idx = 0;
+
+    entered[0] = 0;
+    entered[1] = 0;
+    entered[2] = 0;
+    entered[3] = 0;
+}
+
+
+//=====================================================
+// Display Remaining Tries
+//=====================================================
+void lcd_show_tries()
+{
+    char txt[4];
+
+    Lcd_Cmd(_LCD_CLEAR);
+
+    Lcd_Out(1,1,"Tries:");
+
+    txt[0] = '0' + tries_left;
+    txt[1] = 0;
+
+    Lcd_Out(1,8,txt);
+    Lcd_Out(2,1,"Code:");
+}
+
+
+//=====================================================
+// Motor Control
+//=====================================================
+void motor_open()
+{
+    unsigned int i;
+
+    // L298 Connections
+    // IN1 = PB0
+    // IN2 = PB7
+    // ENA = PB8
+
+    GPIOB_ODR |= (1<<0);
+    GPIOB_ODR &= ~(1<<7);
+
+    for(i=0; i<3000; i++)
+    {
+        GPIOB_ODR |= (1<<8);
+        Delay_us(50);
+
+        GPIOB_ODR &= ~(1<<8);
+        Delay_us(50);
+    }
+
+    GPIOB_ODR &= ~((1<<0)|(1<<7)|(1<<8));
+}
+
+
+//=====================================================
+// Alarm Buzzer
+//=====================================================
+void buzzer_alarm()
+{
+    GPIOB_ODR |= (1<<10);
+
+    Delay_ms(30);
+
+    GPIOB_ODR &= ~(1<<10);
+}
+
+
+//=====================================================
+// Main Program
+//=====================================================
+void main()
+{
+    unsigned short pos;
+
+    //-------------------------------------------------
+    // Enable GPIOA & GPIOB Clocks
+    //-------------------------------------------------
+    RCC_APB2ENR |= (1<<2) | (1<<3);
+
+    //-------------------------------------------------
+    // Keypad Configuration
+    //-------------------------------------------------
+
+    // PA4-PA7 Outputs
+    GPIOA_CRL &= 0x0000FFFF;
+    GPIOA_CRL |= 0x22220000;
+
+    // PA0-PA2 Inputs with Pull-up
+    GPIOA_CRL &= 0xFFFFF000;
+    GPIOA_CRL |= (0x8<<0) | (0x8<<4) | (0x8<<8);
+
+    GPIOA_ODR |= (1<<0) | (1<<1) | (1<<2);
+
+    // PA3 Input Pull-up (Unused)
+    GPIOA_CRL |= (0x8<<12);
+    GPIOA_ODR |= (1<<3);
+
+
+    //-------------------------------------------------
+    // LCD + Motor + LED + Buzzer Configuration
+    //-------------------------------------------------
+
+    GPIOB_CRL |= 0x22222220;
+
+    // PB0 Output
+    GPIOB_CRL &= 0xFFFFFFF0;
+    GPIOB_CRL |= 0x00000002;
+
+    // PB7 Output
+    GPIOB_CRL &= 0x0FFFFFFF;
+    GPIOB_CRL |= 0x20000000;
+
+    // PB8, PB9, PB10 Outputs
+    GPIOB_CRH &= 0xFFFFF000;
+    GPIOB_CRH |= 0x00000222;
+
+    // Initial Outputs LOW
+    GPIOB_ODR &= ~((1<<0)|(1<<7)|(1<<8)|(1<<9)|(1<<10));
+
+
+    //-------------------------------------------------
+    // LCD Initialization
+    //-------------------------------------------------
+    Lcd_Init();
+    Lcd_Cmd(_LCD_CURSOR_OFF);
+
+    lcd_show_tries();
+
+
+    //-------------------------------------------------
+    // Main Loop
+    //-------------------------------------------------
+    while(1)
+    {
+        char k = keypad_read();
+
+        if(k != 0)
+        {
+            //-----------------------------------------
+            // Reset Button (#)
+            //-----------------------------------------
+            if(k == '#')
+            {
+                reset_code();
+
+                fail_count = 0;
+                tries_left = 3;
+
+                GPIOB_ODR &= ~((1<<9)|(1<<0)|(1<<7)|(1<<8));
+
+                lcd_show_tries();
+            }
+
+            //-----------------------------------------
+            // Numeric Keys
+            //-----------------------------------------
+            else if(k >= '0' && k <= '9')
+            {
+                if(idx < 4)
+                {
+                    entered[idx] = k;
+
+                    pos = 6 + idx;
+                    Lcd_Chr(2, pos, k);
+
+                    idx++;
+                }
+
+                //-------------------------------------
+                // Check Password
+                //-------------------------------------
+                if(idx == 4)
+                {
+                    if( entered[0]==correct_code[0] &&
+                        entered[1]==correct_code[1] &&
+                        entered[2]==correct_code[2] &&
+                        entered[3]==correct_code[3] )
+                    {
+                        //---------------------------------
+                        // Correct Password
+                        //---------------------------------
+                        Lcd_Cmd(_LCD_CLEAR);
+                        Lcd_Out(1,1,"UNLOCKED");
+
+                        GPIOB_ODR |= (1<<9);
+
+                        motor_open();
+
+                        GPIOB_ODR &= ~(1<<9);
+
+                        fail_count = 0;
+                        tries_left = 3;
+
+                        delay_ms(10);
+
+                        lcd_show_tries();
+                    }
+                    else
+                    {
+                        //---------------------------------
+                        // Wrong Password
+                        //---------------------------------
+                        fail_count++;
+
+                        if(tries_left > 0)
+                            tries_left--;
+
+                        Lcd_Cmd(_LCD_CLEAR);
+
+                        Lcd_Out(1,1,"INVALID");
+                        Lcd_Out(2,1,"Tries:");
+
+                        pos = '0' + tries_left;
+                        Lcd_Chr(2,8,pos);
+
+                        delay_ms(10);
+
+                        if(fail_count >= 3)
+                        {
+                            buzzer_alarm();
+
+                            fail_count = 0;
+                            tries_left = 3;
+                        }
+
+                        lcd_show_tries();
+                    }
+
+                    reset_code();
+                }
+            }
+        }
+    }
+}
