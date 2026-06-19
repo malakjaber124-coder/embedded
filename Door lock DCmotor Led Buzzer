@@ -1,0 +1,122 @@
+// Predefined passcode and system constants
+const char CORRECT_CODE[4] = {'1', '2', '3', '4'};
+#define BUZZER_TIME_MS 3000
+
+// Function prototypes
+char Keypad_Scan(void);
+void Init_System(void);
+
+void main() {
+    char input_code[4];
+    int attempt_count = 0;
+    int digit_idx = 0;
+    char key;
+    int i;
+    char match;
+
+    Init_System();
+
+    // Ensure outputs start in an OFF state
+    GPIOA_ODR &= ~(1 << 0); // LED off
+    GPIOA_ODR &= ~(1 << 1); // Motor off
+    GPIOA_ODR &= ~(1 << 3); // Buzzer off
+
+    while (1) {
+        key = Keypad_Scan();
+
+        if (key != 0) { // If a valid key is pressed
+            // Store the pressed key
+            input_code[digit_idx] = key;
+            digit_idx++;
+
+            // Debounce delay
+            Delay_ms(250);
+
+            // Once 4 digits are collected, validate them
+            if (digit_idx == 4) {
+                match = 1;
+                for (i = 0; i < 4; i++) {
+                    if (input_code[i] != CORRECT_CODE[i]) {
+                        match = 0;
+                        break;
+                    }
+                }
+
+                if (match == 1) {
+                    // Success: Turn on LED and spin DC Motor
+                    GPIOA_ODR |= (1 << 0);  // Turn on LED (PA0)
+                    GPIOA_ODR |= (1 << 1);  // Spin Motor forward (PA1 High)
+                    GPIOA_ODR &= ~(1 << 2); // PA2 Low
+                    
+                    attempt_count = 0;      // Reset failed attempts
+                    Delay_ms(5000);         // Keep unlocked for 5 seconds
+                    
+                    // Relock system
+                    GPIOA_ODR &= ~(1 << 0);
+                    GPIOA_ODR &= ~(1 << 1);
+                } else {
+                    // Failure: Increment wrong attempts counter
+                    attempt_count++;
+                    
+                    if (attempt_count >= 3) {
+                        // Trigger buzzer for 3 seconds after 3 failed attempts
+                        GPIOA_ODR |= (1 << 3);  // Turn on Buzzer (PA3)
+                        Delay_ms(BUZZER_TIME_MS);
+                        GPIOA_ODR &= ~(1 << 3); // Turn off Buzzer
+                        attempt_count = 0;      // Reset counter after penalty
+                    }
+                }
+                
+                // Reset index for the next passcode entry attempt
+                digit_idx = 0;
+            }
+        }
+        Delay_ms(50);
+    }
+}
+
+// System Initialization
+void Init_System() {
+    // Enable GPIOA and GPIOB Clocks
+    RCC_APB2ENR |= (1 << 2) | (1 << 3);
+
+    // Configure PA0, PA1, PA2, PA3 as General Purpose Output Push-Pull (50MHz)
+    GPIOA_CRL &= 0xFFFF0000; 
+    GPIOA_CRL |= 0x00003333; 
+
+    // Configure PB0 to PB3 (Rows) as Output Push-Pull (50MHz)
+    GPIOB_CRL &= 0xFFFF0000;
+    GPIOB_CRL |= 0x00003333;
+
+    // Configure PB4 to PB7 (Columns) as Input with Pull-Up/Pull-Down
+    GPIOB_CRL &= 0x0000FFFF;
+    GPIOB_CRL |= 0x88880000;
+    GPIOB_ODR |= 0x00F0; // Enable Pull-up resistors for columns (PB4-PB7)
+}
+
+// 4x4 Keypad Matrix Scanning Implementation
+char Keypad_Scan() {
+    // Key layout mapping array
+    char keypad_layout[4][4] = {
+        {'1', '2', '3', 'A'},
+        {'4', '5', '6', 'B'},
+        {'7', '8', '9', 'C'},
+        {'*', '0', '#', 'D'}
+    };
+    int r, c;
+
+    for (r = 0; r < 4; r++) {
+        // Set all rows HIGH, pull current row LOW
+        GPIOB_ODR |= 0x000F;
+        GPIOB_ODR &= ~(1 << r);
+        Delay_ms(5);
+
+        // Check if any column input reads LOW (active press)
+        for (c = 0; c < 4; c++) {
+            if (!(GPIOB_IDR & (1 << (c + 4)))) {
+                return keypad_layout[r][c]; // Key detected
+            }
+        }
+    }
+    return 0; // No key pressed
+}
