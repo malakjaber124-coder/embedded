@@ -1,0 +1,124 @@
+// LCD Module Connections
+sbit LCD_RS at GPIOA_ODR.B0;
+sbit LCD_EN at GPIOA_ODR.B1;
+sbit LCD_D4 at GPIOA_ODR.B2;
+sbit LCD_D5 at GPIOA_ODR.B3;
+sbit LCD_D6 at GPIOA_ODR.B4;
+sbit LCD_D7 at GPIOA_ODR.B5;
+
+// Function Prototypes
+void Init_System(void);
+void Process_Command(char* cmd);
+void Update_LCD(void);
+
+// Global Status Flags
+unsigned int light_status = 0;
+unsigned int fan_status   = 0;
+unsigned int ac_status    = 0;
+
+char rx_buffer[32];
+unsigned int rx_idx = 0;
+
+void main() {
+    Init_System();
+    
+    // Initial LCD Screen Draw
+    Lcd_Cmd(_LCD_CLEAR);
+    Lcd_Cmd(_LCD_CURSOR_OFF);
+    Update_LCD();
+
+    while (1) {
+        // Check if data is available via UART1
+        if (UART1_Data_Ready() == 1) {
+            char rx_char = UART1_Read();
+            
+            // Look for Carriage Return or Line Feed as string terminators
+            if (rx_char == '\r' || rx_char == '\n') {
+                if (rx_idx > 0) {
+                    rx_buffer[rx_idx] = '\0'; // Null-terminate string
+                    Process_Command(rx_buffer);
+                    rx_idx = 0;               // Reset buffer index
+                }
+            } 
+            else if (rx_idx < 31) {
+                rx_buffer[rx_idx++] = rx_char; // Append character
+            }
+        }
+    }
+}
+
+void Init_System() {
+    // Enable GPIOA and GPIOB Peripheral Clocks
+    RCC_APB2ENR |= (1 << 2) | (1 << 3);
+
+    // Configure PB0, PB1, PB2 as Output Push-Pull (50MHz) for appliances
+    GPIOB_CRL &= 0xFFFFF000;
+    GPIOB_CRL |= 0x00000333;
+    
+    // Clear outputs initially
+    GPIOB_ODR &= ~(1 << 0) & ~(1 << 1) & ~(1 << 2);
+
+    // Initialize LCD (Defaults Pins configured via sbit declarations)
+    Lcd_Init();
+
+    // Initialize UART1 at 9600 bps using default alternative pin mappings
+    UART1_Init(9600);
+    Delay_ms(100);
+}
+
+void Process_Command(char* cmd) {
+    // Parse Valid Command Matrix
+    if (strcmp(cmd, "LIGHT1 ON") == 0) {
+        GPIOB_ODR |= (1 << 0);
+        light_status = 1;
+        Update_LCD();
+    } 
+    else if (strcmp(cmd, "LIGHT1 OFF") == 0) {
+        GPIOB_ODR &= ~(1 << 0);
+        light_status = 0;
+        Update_LCD();
+    } 
+    else if (strcmp(cmd, "FAN ON") == 0) {
+        GPIOB_ODR |= (1 << 1);
+        fan_status = 1;
+        Update_LCD();
+    } 
+    else if (strcmp(cmd, "FAN OFF") == 0) {
+        GPIOB_ODR &= ~(1 << 1);
+        fan_status = 0;
+        Update_LCD();
+    } 
+    else if (strcmp(cmd, "AC ON") == 0) {
+        GPIOB_ODR |= (1 << 2);
+        ac_status = 1;
+        Update_LCD();
+    } 
+    else if (strcmp(cmd, "AC OFF") == 0) {
+        GPIOB_ODR &= ~(1 << 2);
+        ac_status = 0;
+        Update_LCD();
+    } 
+    else {
+        // Error handling fallback for any unrecognized serial command strings
+        Lcd_Cmd(_LCD_CLEAR);
+        Lcd_Out(1, 1, "Command Error!");
+        UART1_Write_Text("Error\r\n");
+        Delay_ms(1500);
+        Update_LCD(); // Restore normal dashboard display tracking state
+    }
+}
+
+void Update_LCD() {
+    Lcd_Cmd(_LCD_CLEAR);
+    
+    // Line 1 Formatting: L:[ON/OFF]  F:[ON/OFF]
+    Lcd_Out(1, 1, "L:");
+    Lcd_Out(1, 3, light_status ? "ON " : "OFF");
+    
+    Lcd_Out(1, 9, "F:");
+    Lcd_Out(1, 11, fan_status ? "ON " : "OFF");
+    
+    // Line 2 Formatting: AC:[ON/OFF]
+    Lcd_Out(2, 1, "AC:");
+    Lcd_Out(2, 4, ac_status ? "ON " : "OFF");
+}
