@@ -1,0 +1,172 @@
+// LCD Module Connections
+sbit LCD_RS at GPIOA_ODR.B0;
+sbit LCD_EN at GPIOA_ODR.B1;
+sbit LCD_D4 at GPIOA_ODR.B2;
+sbit LCD_D5 at GPIOA_ODR.B3;
+sbit LCD_D6 at GPIOA_ODR.B4;
+sbit LCD_D7 at GPIOA_ODR.B5;
+
+// Keypad Module Connections for ARM
+unsigned long keypadPort_Input  at GPIOB_IDR;
+unsigned long keypadPort_Output at GPIOB_ODR;
+
+// Configuration Parameters
+const char CORRECT_CODE[5] = "1234";
+char entered_code[5];
+unsigned int code_idx = 0;
+unsigned int failed_attempts = 0;
+
+void Reset_Lock_State() {
+    memset(entered_code, 0, sizeof(entered_code));
+    code_idx = 0;
+    Lcd_Cmd(_LCD_CLEAR);
+    Lcd_Out(1, 1, "Enter Code:");
+}
+
+void main() {
+    char kp;
+
+    // Enable Clocks for Ports A and B
+    GPIO_Clk_Enable(&GPIOA_BASE);
+    GPIO_Clk_Enable(&GPIOB_BASE);
+
+    // PA6 = LED
+    // PA7 = L298 IN1
+    // PA8 = Buzzer
+    // PA9 = L298 IN2
+    // PA10 = L298 ENA
+    GPIO_Config(&GPIOA_BASE,
+                _GPIO_PINMASK_6 |
+                _GPIO_PINMASK_7 |
+                _GPIO_PINMASK_8 |
+                _GPIO_PINMASK_9 |
+                _GPIO_PINMASK_10,
+                _GPIO_CFG_MODE_OUTPUT |
+                _GPIO_CFG_SPEED_50MHZ |
+                _GPIO_CFG_OTYPE_PP);
+
+    // Initial states
+    GPIOA_ODR.B6  = 0;   // LED OFF
+    GPIOA_ODR.B7  = 0;   // IN1
+    GPIOA_ODR.B8  = 0;   // Buzzer OFF
+    GPIOA_ODR.B9  = 0;   // IN2
+    GPIOA_ODR.B10 = 0;   // ENA
+
+    // Initialize display and keypad
+    Lcd_Init();
+    Lcd_Cmd(_LCD_CLEAR);
+    Lcd_Cmd(_LCD_CURSOR_OFF);
+
+    Keypad_Init();
+    Delay_ms(100);
+
+    Reset_Lock_State();
+
+    while (1) {
+
+        kp = 0;
+
+        do {
+            kp = Keypad_Key_Click();
+        } while (!kp);
+
+        switch (kp) {
+            case 1:  kp = '1'; break;
+            case 2:  kp = '4'; break;
+            case 3:  kp = '7'; break;
+            case 4:  kp = '*'; break;
+
+            case 5:  kp = '2'; break;
+            case 6:  kp = '5'; break;
+            case 7:  kp = '8'; break;
+            case 8:  kp = '0'; break;
+
+            case 9:  kp = '3'; break;
+            case 10: kp = '6'; break;
+            case 11: kp = '9'; break;
+            case 12: kp = '#'; break;
+
+            default: kp = '?'; break;
+        }
+
+        if (kp == '*') {
+            Reset_Lock_State();
+        }
+        else if (kp >= '0' && kp <= '9') {
+
+            if (code_idx < 4) {
+
+                entered_code[code_idx] = kp;
+
+                // Show entered digit
+                Lcd_Chr(2, code_idx + 1, kp);
+
+                code_idx++;
+
+                if (code_idx == 4) {
+
+                    entered_code[4] = '\0';
+
+                    Delay_ms(300);
+
+                    // Correct password
+                    if (strcmp(entered_code, CORRECT_CODE) == 0) {
+
+                        failed_attempts = 0;
+
+                        Lcd_Cmd(_LCD_CLEAR);
+                        Lcd_Out(1, 1, "Access Granted!");
+                        Lcd_Out(2, 1, "Door Unlocked");
+
+                        // LED ON
+                        GPIOA_ODR.B6 = 1;
+
+                        // Motor Forward
+                        GPIOA_ODR.B10 = 1; // ENA
+                        GPIOA_ODR.B7  = 1; // IN1
+                        GPIOA_ODR.B9  = 0; // IN2
+
+                        Delay_ms(300);
+
+                        // Stop Motor
+                        GPIOA_ODR.B7  = 0;
+                        GPIOA_ODR.B9  = 0;
+                        GPIOA_ODR.B10 = 0;
+
+                        // LED OFF
+                        GPIOA_ODR.B6 = 0;
+
+                        Reset_Lock_State();
+                    }
+
+                    // Wrong password
+                    else {
+
+                        failed_attempts++;
+
+                        Lcd_Cmd(_LCD_CLEAR);
+                        Lcd_Out(1, 1, "Access Denied!");
+
+                        if (failed_attempts >= 3) {
+
+                            Lcd_Out(2, 1, "ALARM TRIGGERED");
+
+                            GPIOA_ODR.B8 = 1; // Buzzer ON
+                            Delay_ms(1000);
+                            GPIOA_ODR.B8 = 0; // Buzzer OFF
+
+                            failed_attempts = 0;
+                        }
+                        else {
+
+                            Lcd_Out(2, 1, "Wrong Password!");
+                            Delay_ms(1000);
+                        }
+
+                        Reset_Lock_State();
+                    }
+                }
+            }
+        }
+    }
+}
