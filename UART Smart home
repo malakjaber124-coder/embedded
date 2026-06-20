@@ -1,0 +1,91 @@
+// LCD module connections
+sbit LCD_RS at GPIOA_ODR.B0;
+sbit LCD_EN at GPIOA_ODR.B1;
+sbit LCD_D4 at GPIOA_ODR.B2;
+sbit LCD_D5 at GPIOA_ODR.B3;
+sbit LCD_D6 at GPIOA_ODR.B4;
+sbit LCD_D7 at GPIOA_ODR.B5;
+// End LCD module connections
+
+char uart_cmd;
+
+// Function to refresh status on the LCD
+void Update_LCD_Status() {
+    Lcd_Cmd(_LCD_CLEAR);
+
+    // Line 1: Display LED states
+    Lcd_Out(1, 1, "L1:");
+    if (GPIOB_ODR.B0) Lcd_Out(1, 4, "ON ");
+    else              Lcd_Out(1, 4, "OFF");
+
+    Lcd_Out(1, 9, "L2:");
+    if (GPIOB_ODR.B1) Lcd_Out(1, 12, "ON ");
+    else              Lcd_Out(1, 12, "OFF");
+
+    // Line 2: Display Fan state
+    Lcd_Out(2, 1, "FAN:");
+    if (GPIOB_ODR.B3) Lcd_Out(2, 5, "ON ");
+    else              Lcd_Out(2, 5, "OFF");
+}
+
+void main() {
+    // 1. Initialize LCD pins as Outputs (PA0 to PA5)
+    GPIO_Digital_Output(&GPIOA_BASE,
+        _GPIO_PINMASK_0 | _GPIO_PINMASK_1 | _GPIO_PINMASK_2 |
+        _GPIO_PINMASK_3 | _GPIO_PINMASK_4 | _GPIO_PINMASK_5);
+
+    // 2. Initialize Peripherals as Outputs (PB0, PB1 for LEDs, PB3 for Fan)
+    GPIO_Digital_Output(&GPIOB_BASE, _GPIO_PINMASK_0 | _GPIO_PINMASK_1 | _GPIO_PINMASK_3);
+
+    // Set initial output states to LOW (All turned off)
+    GPIOB_ODR.B0 = 0;
+    GPIOB_ODR.B1 = 0;
+    GPIOB_ODR.B3 = 0;
+
+    // 3. Setup LCD Setup
+    Lcd_Init();
+    Lcd_Cmd(_LCD_CLEAR);
+    Lcd_Cmd(_LCD_CURSOR_OFF);
+
+    // 4. Initialize Hardware USART1 at 9600 bps (Maps automatically to PA9 and PA10)
+    UART1_Init(9600);
+    Delay_ms(100);
+
+    // Display initial startup status
+    Update_LCD_Status();
+
+    while(1) {
+        // Check if a character has been received via UART
+        if (UART1_Data_Ready() == 1) {
+            uart_cmd = UART1_Read(); // Fetch character
+
+            // Parse terminal commands
+            switch(uart_cmd) {
+                case '1':
+                    GPIOB_ODR.B0 = 1;  // LED 1 ON
+                    break;
+                case '2':
+                    GPIOB_ODR.B0 = 0;  // LED 1 OFF
+                    break;
+                case '3':
+                    GPIOB_ODR.B1 = 1;  // LED 2 ON
+                    break;
+                case '4':
+                    GPIOB_ODR.B1 = 0;  // LED 2 OFF
+                    break;
+                case '5':
+                    GPIOB_ODR.B3 = 1;  // Fan ON
+                    break;
+                case '6':
+                    GPIOB_ODR.B3 = 0;  // Fan OFF
+                    break;
+                default:
+                    // Ignore any other typed keys
+                    break;
+            }
+
+            // Refresh screen to reflect hardware updates
+            Update_LCD_Status();
+        }
+    }
+}
